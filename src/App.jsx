@@ -63,6 +63,29 @@ const MATERIALS = {
 
 const TIER_COLORS = { S: '#ffd700' }
 
+// ---- Signature Moments: the double-tap library ----
+const SIGNATURES = {
+  flash: 'Golden Flash',
+  gravity: 'Gravity Drop',
+  shatter: 'Shatter & Reform',
+  prism: 'Prism Burst',
+}
+
+const easeOut = (x) => 1 - Math.pow(1 - x, 3)
+const easeInOut = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2)
+
+// shard layout for Shatter: 6x8 grid, each with its own explosion vector
+const SHARD_COLS = 6, SHARD_ROWS = 8
+const SHARDS = Array.from({ length: SHARD_COLS * SHARD_ROWS }, (_, i) => {
+  const c = i % SHARD_COLS, r = Math.floor(i / SHARD_COLS)
+  return {
+    bx: (c + 0.5) * (2.5 / SHARD_COLS) - 1.25,
+    by: (r + 0.5) * (3.5 / SHARD_ROWS) - 1.75,
+    x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 2, z: Math.random() * 1.5 + 0.3,
+    rx: (Math.random() - 0.5) * 4, ry: (Math.random() - 0.5) * 4, rz: (Math.random() - 0.5) * 4,
+  }
+})
+
 // ---- the utility side: edit URLs here ----
 const LINKS = [
   { label: 'SPOTIFY', url: 'https://open.spotify.com/artist/2hbge2y8iTFX7VNniR7Oyx' },
@@ -95,10 +118,14 @@ function BackLink({ label, url, y, dragRef }) {
   )
 }
 
-function Card({ materialKey, signal, flipSignal }) {
+function Card({ materialKey, signal, flipSignal, sigKey }) {
   const group = useRef()
+  const cardBody = useRef()
+  const shardG = useRef()
+  const prismG = useRef()
   const flash = useRef()
   const bodyMat = useRef()
+  const fx = useRef(null)          // active signature moment
   const photo = useLoader(THREE.TextureLoader, '/premee.jpg')
   photo.colorSpace = THREE.SRGBColorSpace
 
@@ -121,8 +148,19 @@ function Card({ materialKey, signal, flipSignal }) {
     return () => window.removeEventListener('deviceorientation', onOrient)
   }, [])
 
-  // signature moment trigger from the button
-  useEffect(() => { if (signal) burst.current = 1 }, [signal])
+  // signature moment trigger (button or double-tap)
+  const sigRef = useRef(sigKey)
+  sigRef.current = sigKey
+  const triggerSig = () => {
+    const k = sigRef.current
+    if (k === 'flash') burst.current = 1
+    else if (!fx.current) fx.current = { type: k, t: 0, y: 0, vy: 1.5, bounces: 0 }
+  }
+  const firstSignal = useRef(true)
+  useEffect(() => {
+    if (firstSignal.current) { firstSignal.current = false; return }
+    triggerSig()
+  }, [signal])
 
   // flip: a firm physical spin impulse — the settle logic lands it on the other face
   useEffect(() => { if (flipSignal) vel.current.y += 7 }, [flipSignal])
@@ -133,7 +171,7 @@ function Card({ materialKey, signal, flipSignal }) {
     drag.current = { px: e.clientX, py: e.clientY, t: performance.now(), vx: 0, vy: 0, moved: 0 }
     // double-tap detection → signature moment
     const now = performance.now()
-    if (now - lastTap.current < 300) burst.current = 1
+    if (now - lastTap.current < 300) triggerSig()
     lastTap.current = now
   }
   const onMove = (e) => {
@@ -199,6 +237,58 @@ function Card({ materialKey, signal, flipSignal }) {
       bodyMat.current.emissiveIntensity = p.base + heartbeat * 0.35 + spinFlare + burst.current * 1.5
     }
 
+    // ---- signature moments ----
+    let fxY = 0
+    const f = fx.current
+    if (f?.type === 'gravity') {
+      // gravity switches on: fall, bounce with restitution, float back home
+      if (!f.returning) {
+        f.vy -= 22 * dt
+        f.y += f.vy * dt
+        if (f.y < -2.3) {
+          f.y = -2.3
+          f.vy = -f.vy * 0.48
+          f.bounces += 1
+          vel.current.x += (Math.random() - 0.5) * 3          // bounce jolts the tumble
+          burst.current = Math.max(burst.current, 0.4)        // impact glint (decays naturally)
+          if (f.bounces >= 3 && Math.abs(f.vy) < 1.2) f.returning = true
+        }
+      } else {
+        f.y = THREE.MathUtils.damp(f.y, 0, 2, dt)      // zero-g reclaims it
+        if (Math.abs(f.y) < 0.02) fx.current = null
+      }
+      fxY = f?.y ?? 0
+    } else if (f?.type === 'shatter') {
+      f.t += dt
+      let k
+      if (f.t < 0.45) k = easeOut(f.t / 0.45)                    // explode
+      else if (f.t < 0.85) k = 1                                  // hang in the air
+      else if (f.t < 1.6) k = 1 - easeInOut((f.t - 0.85) / 0.75) // pull back together
+      else { k = 0; fx.current = null }
+      const showShards = k > 0.001
+      if (shardG.current && cardBody.current) {
+        shardG.current.visible = showShards
+        cardBody.current.visible = !showShards
+        shardG.current.children.forEach((m, i) => {
+          const s = SHARDS[i]
+          m.position.set(s.bx + s.x * k * 1.6, s.by + s.y * k * 1.6, s.z * k)
+          m.rotation.set(s.rx * k, s.ry * k, s.rz * k)
+        })
+        flash.current.intensity = k * 18
+      }
+    } else if (f?.type === 'prism') {
+      f.t += dt
+      const e = Math.max(0, 1 - f.t / 1.3)
+      if (prismG.current) {
+        prismG.current.visible = e > 0.01
+        prismG.current.scale.setScalar(1 + (1 - e) * 4)
+        prismG.current.rotation.z += dt * 1.2
+        prismG.current.children.forEach((m) => { m.material.opacity = e * 0.65 })
+      }
+      flash.current.intensity = e * 45
+      if (e <= 0.01) fx.current = null
+    }
+
     // the breath: it exists, it doesn't animate
     const breatheY = Math.sin(t * 0.6) * 0.035
     const breatheR = Math.sin(t * 0.4) * 0.02
@@ -206,14 +296,14 @@ function Card({ materialKey, signal, flipSignal }) {
     g.rotation.y = rot.current.y + breatheR + tilt.current.y
     g.rotation.x = THREE.MathUtils.damp(g.rotation.x, rot.current.x + tilt.current.x, 8, dt)
     g.rotation.z = Math.sin(t * 0.3) * 0.012
-    g.position.y = breatheY
+    g.position.y = breatheY + fxY
   })
 
   const mat = MATERIALS[materialKey].props
 
   return (
     <group ref={group}>
-      <group onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}>
+      <group ref={cardBody} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}>
         {/* the object: trading-card ratio, thick enough to have weight */}
         <RoundedBox args={[2.5, 3.5, 0.09]} radius={0.045} smoothness={8}>
           <meshPhysicalMaterial ref={bodyMat} key={materialKey} {...mat} />
@@ -272,6 +362,29 @@ function Card({ materialKey, signal, flipSignal }) {
             <meshPhysicalMaterial color="#55555f" metalness={0.8} roughness={0.4} />
           </Text>
         </group>
+      </group>
+
+      {/* Shatter & Reform: the card as 48 shards, hidden until the moment fires */}
+      <group ref={shardG} visible={false}>
+        {SHARDS.map((s, i) => (
+          <mesh key={i} position={[s.bx, s.by, 0]}>
+            <boxGeometry args={[2.5 / SHARD_COLS, 3.5 / SHARD_ROWS, 0.09]} />
+            <meshPhysicalMaterial color={mat.color} metalness={mat.metalness ?? 0.5}
+              roughness={mat.roughness ?? 0.2} clearcoat={1} clearcoatRoughness={0.1}
+              emissive="#ffb84d" emissiveIntensity={0.15} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Prism Burst: radial light shafts */}
+      <group ref={prismG} visible={false}>
+        {Array.from({ length: 8 }, (_, i) => (
+          <mesh key={i} rotation-z={(i * Math.PI) / 4}>
+            <planeGeometry args={[0.14, 7]} />
+            <meshBasicMaterial color="#fff6d8" transparent opacity={0}
+              blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} />
+          </mesh>
+        ))}
       </group>
 
       {/* S-tier aura + signature flash */}
@@ -345,13 +458,14 @@ export default function App() {
   const [signal, setSignal] = useState(0)
   const [flipSignal, setFlipSignal] = useState(0)
   const [bright, setBright] = useState(0.35)
+  const [sigKey, setSigKey] = useState('shatter')
   return (
     <div className="stage">
       <Canvas camera={{ position: [0, 0, 6.0], fov: 42 }} dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }}>
         <color attach="background" args={[
           new THREE.Color('#050507').lerp(new THREE.Color('#23232e'), bright)
         ]} />
-        <Card materialKey={materialKey} signal={signal} flipSignal={flipSignal} />
+        <Card materialKey={materialKey} signal={signal} flipSignal={flipSignal} sigKey={sigKey} />
         <ZoomRig />
         <Studio bright={bright} />
       </Canvas>
@@ -366,7 +480,12 @@ export default function App() {
           ))}
         </select>
         <button onClick={() => setFlipSignal(s => s + 1)}>⟳ Flip</button>
-        <button onClick={() => setSignal(s => s + 1)}>✦ Signature</button>
+        <select className="matpick" value={sigKey} onChange={(e) => setSigKey(e.target.value)}>
+          {Object.entries(SIGNATURES).map(([k, label]) => (
+            <option key={k} value={k}>✦ {label}</option>
+          ))}
+        </select>
+        <button onClick={() => setSignal(s => s + 1)}>✦ Fire</button>
         <label className="light">
           ☀
           <input type="range" min="0" max="1" step="0.01" value={bright}
