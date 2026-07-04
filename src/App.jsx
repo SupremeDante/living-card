@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useMemo } from 'react'
 import { Canvas, useFrame, useLoader } from '@react-three/fiber'
 import { Environment, Lightformer, Text, RoundedBox, Sparkles } from '@react-three/drei'
 import * as THREE from 'three'
@@ -62,6 +62,82 @@ const MATERIALS = {
 }
 
 const TIER_COLORS = { S: '#ffd700' }
+
+// ---- Material auras: the space around the object belongs to the material too ----
+// fall = snow/dust sinking · drip = slides down the glass, then drops off · rise = embers/wisps floating up · orbit = holograms circling
+const AURAS = {
+  holographic: { type: 'orbit', color: '#7ff6ff', count: 90, size: 0.045 },
+  oilslick: { type: 'orbit', color: '#c98fff', count: 70, size: 0.04 },
+  gold: { type: 'fall', color: '#ffdf8a', count: 80, size: 0.03 },
+  frozenvoid: { type: 'fall', color: '#cfeaff', count: 130, size: 0.04 },
+  phantom: { type: 'rise', color: '#aeb4c4', count: 60, size: 0.05 },
+  ember: { type: 'rise', color: '#ff7a1a', count: 110, size: 0.035 },
+  bloodglass: { type: 'drip', color: '#b00018', count: 60, size: 0.055 },
+}
+
+function Aura({ type, color, count, size }) {
+  const pts = useRef()
+  const seeds = useMemo(() =>
+    Array.from({ length: count }, () => ({
+      x: (Math.random() - 0.5) * 4.2,
+      y: (Math.random() - 0.5) * 4.6,
+      z: (Math.random() - 0.5) * 1.6,
+      s: 0.2 + Math.random() * 0.5,          // individual speed
+      p: Math.random() * Math.PI * 2,        // phase
+      r: 1.6 + Math.random() * 0.9,          // orbit radius
+      vy: 0,                                  // drip fall velocity
+    })), [type, count])
+  const positions = useMemo(() => new Float32Array(count * 3), [type, count])
+
+  useFrame((state, dt) => {
+    const t = state.clock.elapsedTime
+    for (let i = 0; i < count; i++) {
+      const d = seeds[i]
+      if (type === 'fall') {
+        d.y -= d.s * 0.55 * dt
+        if (d.y < -2.4) { d.y = 2.4; d.x = (Math.random() - 0.5) * 4.2 }
+        positions[i * 3] = d.x + Math.sin(t * 0.8 + d.p) * 0.12   // gentle sway
+        positions[i * 3 + 1] = d.y
+        positions[i * 3 + 2] = d.z
+      } else if (type === 'rise') {
+        d.y += d.s * 0.5 * dt
+        if (d.y > 2.4) { d.y = -2.4; d.x = (Math.random() - 0.5) * 3.4 }
+        positions[i * 3] = d.x + Math.sin(t * 2.2 + d.p) * 0.06   // heat flicker
+        positions[i * 3 + 1] = d.y
+        positions[i * 3 + 2] = d.z * 0.6
+      } else if (type === 'drip') {
+        if (d.y > -1.78) {
+          d.y -= d.s * 0.11 * dt                                   // beading down the glass
+          d.x = THREE.MathUtils.clamp(d.x, -1.15, 1.15)
+          d.z = d.z > 0 ? 0.075 : -0.075                           // hugging the faces
+        } else {
+          d.vy += 4.5 * dt                                         // free fall off the edge
+          d.y -= d.vy * dt
+        }
+        if (d.y < -3) { d.y = 1.6 + Math.random(); d.vy = 0; d.x = (Math.random() - 0.5) * 2.3; d.z = Math.random() > 0.5 ? 0.075 : -0.075 }
+        positions[i * 3] = d.x
+        positions[i * 3 + 1] = d.y
+        positions[i * 3 + 2] = d.z
+      } else { // orbit
+        const a = d.p + t * d.s * 0.6
+        positions[i * 3] = Math.cos(a) * d.r
+        positions[i * 3 + 1] = d.y * 0.4 + Math.sin(t * 0.5 + d.p) * 0.35
+        positions[i * 3 + 2] = Math.sin(a) * d.r * 0.45
+      }
+    }
+    if (pts.current) pts.current.geometry.attributes.position.needsUpdate = true
+  })
+
+  return (
+    <points ref={pts} key={type}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <pointsMaterial color={color} size={size} transparent opacity={0.75}
+        blending={THREE.AdditiveBlending} depthWrite={false} sizeAttenuation />
+    </points>
+  )
+}
 
 // ---- Signature Moments: the double-tap library ----
 const SIGNATURES = {
@@ -467,6 +543,7 @@ export default function App() {
           new THREE.Color('#050507').lerp(new THREE.Color('#232324'), bright)
         ]} />
         <Card materialKey={materialKey} signal={signal} flipSignal={flipSignal} sigKey={sigKey} />
+        {AURAS[materialKey] && <Aura key={materialKey} {...AURAS[materialKey]} />}
         <ZoomRig />
         <Studio bright={bright} />
       </Canvas>
