@@ -4,29 +4,60 @@ import { Environment, Lightformer, Text, RoundedBox, Sparkles } from '@react-thr
 import * as THREE from 'three'
 import './App.css'
 
-// ---- Material library — the customization system starts here ----
+// ---- The Cosmetic Engine: material library ----
+// Every material is real PBR — no fake video effects. pulse/sparkle/auraColor
+// are physical behaviors wired into the physics loop (flick harder = flare harder).
 const MATERIALS = {
+  // 💎 Luxe
   obsidian: {
-    label: 'Obsidian',
-    props: {
-      color: '#0a0a0c', metalness: 0.1, roughness: 0.18,
-      clearcoat: 1, clearcoatRoughness: 0.06, reflectivity: 1,
-    },
+    label: 'Obsidian', collection: 'Luxe',
+    props: { color: '#0a0a0c', metalness: 0.1, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.06, reflectivity: 1 },
   },
   holographic: {
-    label: 'Holographic',
-    props: {
-      color: '#1a1a22', metalness: 0.85, roughness: 0.12,
-      clearcoat: 1, clearcoatRoughness: 0.1,
-      iridescence: 1, iridescenceIOR: 1.6, iridescenceThicknessRange: [100, 800],
-    },
+    label: 'Holographic', collection: 'Luxe',
+    props: { color: '#1a1a22', metalness: 0.85, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.1, iridescence: 1, iridescenceIOR: 1.6, iridescenceThicknessRange: [100, 800] },
   },
   chrome: {
-    label: 'Chrome',
-    props: {
-      color: '#c8ccd4', metalness: 1, roughness: 0.06,
-      clearcoat: 0.6, clearcoatRoughness: 0.04,
-    },
+    label: 'Chrome', collection: 'Luxe',
+    props: { color: '#c8ccd4', metalness: 1, roughness: 0.06, clearcoat: 0.6, clearcoatRoughness: 0.04 },
+  },
+  oilslick: {
+    label: 'Oil Slick', collection: 'Luxe',
+    props: { color: '#050506', metalness: 0.4, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.08, iridescence: 1, iridescenceIOR: 1.3, iridescenceThicknessRange: [300, 1400] },
+  },
+  titanium: {
+    label: 'Anodized Titanium', collection: 'Luxe',
+    props: { color: '#8a7690', metalness: 1, roughness: 0.32, clearcoat: 0.3, clearcoatRoughness: 0.2, iridescence: 0.45, iridescenceIOR: 1.8, iridescenceThicknessRange: [200, 600] },
+  },
+  gold: {
+    label: 'Liquid Gold', collection: 'Luxe',
+    props: { color: '#d4a437', metalness: 1, roughness: 0.1, clearcoat: 0.6, clearcoatRoughness: 0.12 },
+  },
+  diamond: {
+    label: 'Diamond Dust', collection: 'Luxe', sparkle: '#ffffff',
+    props: { color: '#dfdfea', metalness: 0.45, roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.03 },
+  },
+  // 🌌 Void
+  eventhorizon: {
+    label: 'Event Horizon', collection: 'Void', sparkle: '#6a6a8a',
+    props: { color: '#000000', metalness: 0.2, roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.3 },
+  },
+  phantom: {
+    label: 'Phantom', collection: 'Void',
+    props: { color: '#aeb4c4', metalness: 0, roughness: 0.1, transmission: 0.9, thickness: 0.4, transparent: true, opacity: 0.6, clearcoat: 1, clearcoatRoughness: 0.1 },
+  },
+  frozenvoid: {
+    label: 'Frozen Void', collection: 'Void',
+    props: { color: '#dff2ff', metalness: 0, roughness: 0.07, transmission: 1, thickness: 0.6, ior: 1.31, clearcoat: 1, clearcoatRoughness: 0.05 },
+  },
+  // 🔥 Forge
+  ember: {
+    label: 'Cooling Ember', collection: 'Forge', pulse: { color: '#ff5a00', base: 0.22, beat: 1.4 },
+    props: { color: '#170d08', metalness: 0.15, roughness: 0.62, clearcoat: 0.15, clearcoatRoughness: 0.5, emissive: '#ff5a00', emissiveIntensity: 0.2 },
+  },
+  bloodglass: {
+    label: 'Blood Glass', collection: 'Alchemy', pulse: { color: '#ff0022', base: 0.1, beat: 1.1 },
+    props: { color: '#6a000f', metalness: 0, roughness: 0.14, transmission: 0.85, thickness: 1.2, clearcoat: 1, clearcoatRoughness: 0.1, emissive: '#3a0008', emissiveIntensity: 0.1 },
   },
 }
 
@@ -67,6 +98,7 @@ function BackLink({ label, url, y, dragRef }) {
 function Card({ materialKey, signal, flipSignal }) {
   const group = useRef()
   const flash = useRef()
+  const bodyMat = useRef()
   const photo = useLoader(THREE.TextureLoader, '/premee.jpg')
   photo.colorSpace = THREE.SRGBColorSpace
 
@@ -158,6 +190,15 @@ function Card({ materialKey, signal, flipSignal }) {
     if (flash.current)
       flash.current.intensity = burst.current * 30
 
+    // living materials: the pulse is physical — spin it harder, it flares hotter
+    const spec = MATERIALS[materialKey]
+    if (spec.pulse && bodyMat.current) {
+      const p = spec.pulse
+      const heartbeat = Math.max(0, Math.sin(t * p.beat * Math.PI)) ** 3
+      const spinFlare = Math.min(Math.abs(vel.current.y) * 0.12, 1.2)
+      bodyMat.current.emissiveIntensity = p.base + heartbeat * 0.35 + spinFlare + burst.current * 1.5
+    }
+
     // the breath: it exists, it doesn't animate
     const breatheY = Math.sin(t * 0.6) * 0.035
     const breatheR = Math.sin(t * 0.4) * 0.02
@@ -175,8 +216,14 @@ function Card({ materialKey, signal, flipSignal }) {
       <group onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}>
         {/* the object: trading-card ratio, thick enough to have weight */}
         <RoundedBox args={[2.5, 3.5, 0.09]} radius={0.045} smoothness={8}>
-          <meshPhysicalMaterial {...mat} />
+          <meshPhysicalMaterial ref={bodyMat} key={materialKey} {...mat} />
         </RoundedBox>
+
+        {/* diamond dust / void particles: sparkles hugging the surface itself */}
+        {MATERIALS[materialKey].sparkle && (
+          <Sparkles count={140} scale={[2.4, 3.4, 0.18]} size={1.6} speed={0.12}
+            color={MATERIALS[materialKey].sparkle} opacity={0.9} />
+        )}
 
         {/* artist photo — a physical print beneath the lacquer */}
         <mesh position={[0, 0.62, 0.047]}>
@@ -309,11 +356,15 @@ export default function App() {
         <Studio bright={bright} />
       </Canvas>
       <div className="controls">
-        {Object.entries(MATERIALS).map(([key, m]) => (
-          <button key={key} className={key === materialKey ? 'active' : ''} onClick={() => setMaterialKey(key)}>
-            {m.label}
-          </button>
-        ))}
+        <select className="matpick" value={materialKey} onChange={(e) => setMaterialKey(e.target.value)}>
+          {['Luxe', 'Void', 'Forge', 'Alchemy'].map((col) => (
+            <optgroup key={col} label={col}>
+              {Object.entries(MATERIALS).filter(([, m]) => m.collection === col).map(([key, m]) => (
+                <option key={key} value={key}>{m.label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
         <button onClick={() => setFlipSignal(s => s + 1)}>⟳ Flip</button>
         <button onClick={() => setSignal(s => s + 1)}>✦ Signature</button>
         <label className="light">
