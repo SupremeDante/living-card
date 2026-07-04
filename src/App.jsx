@@ -444,11 +444,12 @@ function Studio({ bright }) {
         <Lightformer intensity={1.5 * b} rotation-y={-Math.PI / 2} position={[10, 1, 0]} scale={[16, 2, 1]} />
         {/* front fill so the back of the card is readable when flipped */}
         <Lightformer intensity={1.2 * b} position={[0, 0, 9]} scale={[10, 6, 1]} />
-        <Lightformer intensity={0.8 * b} color="#b28aff" rotation-x={Math.PI / 2} position={[0, -4, 6]} scale={[8, 8, 1]} />
+        {/* underglow: near-neutral so metals read true — color belongs to the material, not the studio */}
+        <Lightformer intensity={0.5 * b} color="#e9e9f2" rotation-x={Math.PI / 2} position={[0, -4, 6]} scale={[8, 8, 1]} />
       </Environment>
       {/* soft direct fill — lights the space itself, not just reflections */}
-      <ambientLight intensity={bright * 0.7} color="#cfd4ff" />
-      <pointLight position={[0, 2, 4]} intensity={bright * 12} color="#fff4e0" distance={14} decay={2} />
+      <ambientLight intensity={bright * 0.7} color="#ffffff" />
+      <pointLight position={[0, 2, 4]} intensity={bright * 12} color="#fff8ee" distance={14} decay={2} />
     </>
   )
 }
@@ -463,7 +464,7 @@ export default function App() {
     <div className="stage">
       <Canvas camera={{ position: [0, 0, 6.0], fov: 42 }} dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }}>
         <color attach="background" args={[
-          new THREE.Color('#050507').lerp(new THREE.Color('#23232e'), bright)
+          new THREE.Color('#050507').lerp(new THREE.Color('#232324'), bright)
         ]} />
         <Card materialKey={materialKey} signal={signal} flipSignal={flipSignal} sigKey={sigKey} />
         <ZoomRig />
