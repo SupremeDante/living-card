@@ -59,6 +59,16 @@ const MATERIALS = {
     label: 'Blood Glass', collection: 'Alchemy', pulse: { color: '#ff0022', base: 0.1, beat: 1.1 },
     props: { color: '#6a000f', metalness: 0, roughness: 0.14, transmission: 0.85, thickness: 1.2, clearcoat: 1, clearcoatRoughness: 0.1, emissive: '#3a0008', emissiveIntensity: 0.1 },
   },
+  // ✨ SSS — Ghost Rare × 5-star pull. Dichroic glass, captured starlight inside.
+  sss: {
+    label: 'SSS · Divine', collection: 'SSS', pulse: { color: '#8a5fff', base: 0.22, beat: 0.5 },
+    props: {
+      color: '#241a2e', metalness: 0.9, roughness: 0.07,
+      clearcoat: 1, clearcoatRoughness: 0.04,
+      iridescence: 1, iridescenceIOR: 2.2, iridescenceThicknessRange: [400, 1600],
+      emissive: '#4a3060', emissiveIntensity: 0.22,
+    },
+  },
 }
 
 const TIER_COLORS = { S: '#ffd700' }
@@ -73,6 +83,7 @@ const AURAS = {
   phantom: { type: 'rise', color: '#aeb4c4', count: 60, size: 0.05 },
   ember: { type: 'rise', color: '#ff7a1a', count: 110, size: 0.035 },
   bloodglass: { type: 'drip', color: '#b00018', count: 60, size: 0.055 },
+  sss: { type: 'rise', color: '#ffe9a8', count: 150, size: 0.04 },   // soul particles, defying gravity
 }
 
 function Aura({ type, color, count, size }) {
@@ -136,6 +147,50 @@ function Aura({ type, color, count, size }) {
       <pointsMaterial color={color} size={size} transparent opacity={0.75}
         blending={THREE.AdditiveBlending} depthWrite={false} sizeAttenuation />
     </points>
+  )
+}
+
+// ---- SSS backdrop: magic sigils + volumetric god-rays behind the card ----
+function SSSBackdrop() {
+  const ringA = useRef(), ringB = useRef(), rays = useRef()
+  useFrame((state, dt) => {
+    const t = state.clock.elapsedTime
+    if (ringA.current) ringA.current.rotation.z += dt * 0.12          // sigils counter-rotate, slow and ceremonial
+    if (ringB.current) ringB.current.rotation.z -= dt * 0.22
+    if (rays.current) {
+      rays.current.rotation.z += dt * 0.04
+      const breathe = 0.05 + 0.045 * (0.5 + 0.5 * Math.sin(t * 0.6)) // rays swell with the card's breath
+      rays.current.children.forEach((m) => { m.material.opacity = breathe })
+    }
+  })
+  const glow = { color: '#ffd88a', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }
+  return (
+    <group position={[0, 0, -1.5]}>
+      {/* outer sigil: ring + rune ticks */}
+      <group ref={ringA}>
+        <mesh><ringGeometry args={[2.3, 2.34, 128]} /><meshBasicMaterial {...glow} opacity={0.5} /></mesh>
+        {Array.from({ length: 12 }, (_, i) => (
+          <group key={i} rotation-z={(i * Math.PI) / 6}>
+            <mesh position={[0, 2.32, 0]}><planeGeometry args={[0.05, 0.22]} /><meshBasicMaterial {...glow} opacity={0.55} /></mesh>
+          </group>
+        ))}
+      </group>
+      {/* inner sigil: counter-rotating ring + fine ring */}
+      <group ref={ringB}>
+        <mesh><ringGeometry args={[1.82, 1.84, 128]} /><meshBasicMaterial {...glow} opacity={0.4} /></mesh>
+        <mesh rotation-z={Math.PI / 4}><ringGeometry args={[2.06, 2.07, 6]} /><meshBasicMaterial {...glow} opacity={0.3} /></mesh>
+      </group>
+      {/* god-rays: soft prismatic shafts sweeping the void */}
+      <group ref={rays}>
+        {Array.from({ length: 6 }, (_, i) => (
+          <mesh key={i} rotation-z={(i * Math.PI) / 3 + 0.4}>
+            <planeGeometry args={[0.9, 11]} />
+            <meshBasicMaterial color={['#ffd88a', '#ff9ad5', '#9ae8ff'][i % 3]} transparent opacity={0.06}
+              blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} />
+          </mesh>
+        ))}
+      </group>
+    </group>
   )
 }
 
@@ -385,6 +440,19 @@ function Card({ materialKey, signal, flipSignal, sigKey }) {
           <meshPhysicalMaterial ref={bodyMat} key={materialKey} {...mat} />
         </RoundedBox>
 
+        {/* SSS: heavy liquid-gold trim — blinding on the edges */}
+        {materialKey === 'sss' && (
+          <group>
+            {[[0, 1.78, 2.64, 0.07], [0, -1.78, 2.64, 0.07], [-1.285, 0, 0.07, 3.63], [1.285, 0, 0.07, 3.63]].map(([x, y, w, h], i) => (
+              <mesh key={i} position={[x, y, 0]}>
+                <boxGeometry args={[w, h, 0.115]} />
+                <meshPhysicalMaterial color="#ffd700" metalness={1} roughness={0.08}
+                  clearcoat={1} clearcoatRoughness={0.06} emissive="#8a6a00" emissiveIntensity={0.35} />
+              </mesh>
+            ))}
+          </group>
+        )}
+
         {/* diamond dust / void particles: sparkles hugging the surface itself */}
         {MATERIALS[materialKey].sparkle && (
           <Sparkles count={140} scale={[2.4, 3.4, 0.18]} size={1.6} speed={0.12}
@@ -413,8 +481,8 @@ function Card({ materialKey, signal, flipSignal, sigKey }) {
             <ringGeometry args={[0.155, 0.17, 48]} />
             <meshPhysicalMaterial color={TIER_COLORS.S} metalness={1} roughness={0.15} emissive={TIER_COLORS.S} emissiveIntensity={0.25} />
           </mesh>
-          <Text position={[0, 0, 0.001]} fontSize={0.19} anchorX="center" anchorY="middle">
-            S
+          <Text position={[0, 0, 0.001]} fontSize={materialKey === 'sss' ? 0.11 : 0.19} anchorX="center" anchorY="middle">
+            {materialKey === 'sss' ? 'SSS' : 'S'}
             <meshPhysicalMaterial color={TIER_COLORS.S} metalness={1} roughness={0.2} emissive={TIER_COLORS.S} emissiveIntensity={0.3} />
           </Text>
         </group>
@@ -544,12 +612,13 @@ export default function App() {
         ]} />
         <Card materialKey={materialKey} signal={signal} flipSignal={flipSignal} sigKey={sigKey} />
         {AURAS[materialKey] && <Aura key={materialKey} {...AURAS[materialKey]} />}
+        {materialKey === 'sss' && <SSSBackdrop />}
         <ZoomRig />
         <Studio bright={bright} />
       </Canvas>
       <div className="controls">
         <select className="matpick" value={materialKey} onChange={(e) => setMaterialKey(e.target.value)}>
-          {['Luxe', 'Void', 'Forge', 'Alchemy'].map((col) => (
+          {['SSS', 'Luxe', 'Void', 'Forge', 'Alchemy'].map((col) => (
             <optgroup key={col} label={col}>
               {Object.entries(MATERIALS).filter(([, m]) => m.collection === col).map(([key, m]) => (
                 <option key={key} value={key}>{m.label}</option>
